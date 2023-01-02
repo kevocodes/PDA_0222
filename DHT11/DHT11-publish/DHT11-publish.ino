@@ -1,20 +1,19 @@
 #include <ESP8266WiFi.h>
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
-#include <SPI.h>      // incluye libreria bus SPI
-#include <MFRC522.h>      // incluye libreria especifica para MFRC522
+#include <DHT.h>
 
 /************************* WiFi Access Point *********************************/
 // NO BORRAR
-#define WLAN_SSID       "ARTEFACTOS"
-#define WLAN_PASS       "ARTEFACTOS"
+#define WLAN_SSID       "......."
+#define WLAN_PASS       "......."
 
 /************************* Adafruit.io Setup *********************************/
 // NO BORRAR
 #define AIO_SERVER      "io.adafruit.com"
 #define AIO_SERVERPORT  1883                   // use 8883 for SSL
-#define AIO_USERNAME    "KevinEc21"
-#define AIO_KEY         "aio_ihDc31Qb9ivFwDWOIk3VxfTksvRn"
+#define AIO_USERNAME    ".........."
+#define AIO_KEY         ".........."
 
 /************ Global State (you don't need to change this!) ******************/
 //NO BORRAR
@@ -28,9 +27,14 @@ WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_USERNAME, AIO_KEY);
 
 /****************************** Feeds for Publishing***************************************/
-// Setup a feed called 'photocell' for publishing.
-Adafruit_MQTT_Publish indicator = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/state");
-Adafruit_MQTT_Publish message = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/message");
+// Setup a feed called 'tempC' for publishing.
+Adafruit_MQTT_Publish temperaturaC = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/tempc");
+
+// Setup a feed called 'tempF' for publishing.
+Adafruit_MQTT_Publish temperaturaF = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/tempf");
+
+// Setup a feed called 'humidity' for publishing.
+Adafruit_MQTT_Publish humedad = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humidity");
 
 /****************************** Feeds for Subscribing***************************************/
 // Setup a feed called 'slider' for subscribing to changes on the slider
@@ -43,24 +47,41 @@ Adafruit_MQTT_Publish message = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feed
 
 // ****************Declaración de variables globales, para pines, datos, etc. ******************
 //Ej: int ledRojo = D1;
-#define RST_PIN  D1      // constante para referenciar pin de reset
-#define SS_PIN  D2      // constante para referenciar pin de slave select
+// Definimos el pin digital donde se conecta el sensor
+#define DHTPIN D2 //Cualquiera de los pines digitales libres del ESP8266
+// Dependiendo del tipo de sensor
+#define DHTTYPE DHT11
+ 
+// Inicializamos el sensor DHT11
+DHT dht(DHTPIN, DHTTYPE);
 
-MFRC522 mfrc522(SS_PIN, RST_PIN); // crea objeto mfrc522 enviando pines de slave select y reset
+/*************************** Sketch Code ************************************/
+//Callbacks, funciones para el manejo de la información obtenida en adafruit (subscribed)
+void slidercallback(double x) {
+  Serial.print("Hey we're in a slider callback, the slider value is: ");
+  Serial.println(x);
+}
 
-byte LecturaUID[4];         // crea array para almacenar el UID leido
-byte Usuario1[4]= {0x39, 0xD4, 0xF0, 0xC1} ;    // UID de tarjeta leido en programa 1
-byte Usuario2[4]= {0xA2, 0x6A, 0xAC, 0x1C} ;    // UID de llavero leido en programa 1
-
-
+void onoffcallback(char *data, uint16_t len) {
+  Serial.print("Hey we're in a onoff callback, the button value is: ");
+  Serial.println(data);
+  String message = String(data);
+  message.trim();
+  if (message == "ON") {
+    //Codigo si se envia ON
+    digitalWrite(D0, HIGH);
+  }
+  if (message == "OFF") {
+    //codigo si se envia OFF
+    digitalWrite(D0, LOW);
+  }
+}
 
 //*********************************************** SetUp *****************************/
 void setup() {
   //Definicion del tipo de pines o cosas necesarias para el funcionamiento de sensores
   //Ej: pinMode(D0, OUTPUT);
-  SPI.begin();        // inicializa bus SPI
-  mfrc522.PCD_Init();     // inicializa modulo lector
-  Serial.println("Listo");    // Muestra texto Listo
+  dht.begin();
   
   //Iniciar la comunición Serial (NO BORRAR)
   Serial.begin(115200);
@@ -98,7 +119,7 @@ void setup() {
 
 }
 
-uint32_t x=0;
+//uint32_t x=0;
 
 //***************************************************** Loop ********************************/
 void loop() {
@@ -109,58 +130,47 @@ void loop() {
     mqtt.disconnect();}
 
   //RESTO DEL CODIGO, TRABAJAR NORMAL COMO EN ARDUINO
-  if ( ! mfrc522.PICC_IsNewCardPresent())   // si no hay una tarjeta presente
-    return;           // retorna al loop esperando por una tarjeta
   
-  if ( ! mfrc522.PICC_ReadCardSerial())     // si no puede obtener datos de la tarjeta
-    return;           // retorna al loop esperando por otra tarjeta
-    
-    Serial.print("UID:");       // muestra texto UID:
-    for (byte i = 0; i < mfrc522.uid.size; i++) { // bucle recorre de a un byte por vez el UID
-      if (mfrc522.uid.uidByte[i] < 0x10){   // si el byte leido es menor a 0x10
-        Serial.print(" 0");       // imprime espacio en blanco y numero cero
-        }
-        else{           // sino
-          Serial.print(" ");        // imprime un espacio en blanco
-          }
-          Serial.print(mfrc522.uid.uidByte[i], HEX);    // imprime el byte del UID leido en hexadecimal
-          LecturaUID[i]=mfrc522.uid.uidByte[i];     // almacena en array el byte del UID leido      
-          }
-          
-          Serial.print("\t");         // imprime un espacio de tabulacion             
-                    
-          if(comparaUID(LecturaUID, Usuario1)){
-            // llama a funcion comparaUID con Usuario1
-            Serial.println("Bienvenido Usuario 1"); // si retorna verdadero muestra texto bienvenida
-            indicator.publish(1);
-            message.publish("Bienvenido Usuario 1");
-          }    
-          else if(comparaUID(LecturaUID, Usuario2)){
-            // llama a funcion comparaUID con Usuario2
-            Serial.println("Bienvenido Usuario 2"); // si retorna verdadero muestra texto bienvenida
-            indicator.publish(1);
-            message.publish("Bienvenido Usuario 2");
-          }else{
-            // si retorna falso
-            Serial.println("No te conozco");    // muestra texto equivalente a acceso denegado
-            indicator.publish(0);
-            message.publish("No te conozco");
-          }          
-          
-          mfrc522.PICC_HaltA();     // detiene comunicacion con tarjeta 
-          delay(5000);
-          indicator.publish(0);
-          message.publish("Waiting for acces...");
-}
-      
-//Function to CampareUID
-boolean comparaUID(byte lectura[],byte usuario[]) // funcion comparaUID
-{
-  for (byte i=0; i < mfrc522.uid.size; i++){    // bucle recorre de a un byte por vez el UID
-  if(lectura[i] != usuario[i])        // si byte de UID leido es distinto a usuario
-    return(false);          // retorna falso
+  // Esperamos 5 segundos entre medidas
+  delay(5000);
+ 
+  // Leemos la humedad relativa
+  float h = dht.readHumidity();
+  // Leemos la temperatura en grados centígrados (por defecto)
+  float t = dht.readTemperature();
+  // Leemos la temperatura en grados Fahreheit
+  float f = dht.readTemperature(true);
+ 
+  // Comprobamos si ha habido algún error en la lectura
+  if (isnan(h) || isnan(t) || isnan(f)) {
+    Serial.println("Error obteniendo los datos del sensor DHT11");
+    return;
   }
-  return(true);           // si los 4 bytes coinciden retorna verdadero
+ 
+  // Calcular el índice de calor en Fahreheit
+  float hif = dht.computeHeatIndex(f, h);
+  // Calcular el índice de calor en grados centígrados
+  float hic = dht.computeHeatIndex(t, h, false);
+ 
+  Serial.print("Humedad: ");
+  Serial.print(h);
+  Serial.print(" %\t");
+  humedad.publish(h);
+  
+  Serial.print("Temperatura: ");
+  Serial.print(t);
+  Serial.print(" *C ");
+  temperaturaC.publish(t);
+
+  Serial.print(f);
+  Serial.print(" *F\t");
+  temperaturaF.publish(f);
+  
+  Serial.print("Índice de calor: ");
+  Serial.print(hic);
+  Serial.print(" *C ");
+  Serial.print(hif);
+  Serial.println(" *F"); 
 }
 
 // Function to connect and reconnect as necessary to the MQTT server.
